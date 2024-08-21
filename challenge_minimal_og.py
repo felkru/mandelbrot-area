@@ -9,7 +9,7 @@ import numpy as np
 import numba as nb
 
 from utils import (
-    combine_uncertaintes,
+    combine_uncertainties,
     confidence_interval,
     wald_uncertainty,
 )
