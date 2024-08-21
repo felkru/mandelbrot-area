@@ -1,118 +1,125 @@
-#!/usr/bin/env -S submit -M 2000 -m 2000 -f python -u
-
-# This script is based on a Jupyter notebook provided by Jim Pivarski
-# You can find it on GitHub: https://github.com/ErUM-Data-Hub/Challenges/blob/computing_challenge/computing/challenge.ipynb
-# The markdown cells have been converted to raw comments
-# and some of the LaTeX syntax has been removed for readability
-
+import jax.numpy as jnp
+from jax import jit, random
 import numpy as np
-import numba as nb
-
-from utils import (
-    combine_uncertaintes,
-    confidence_interval,
-    wald_uncertainty,
-)
-
-# ignore deprecation warnings from numba for now
-from numba.core.errors import NumbaDeprecationWarning, NumbaPendingDeprecationWarning
-import warnings
-
-warnings.simplefilter("ignore", category=NumbaDeprecationWarning)
-warnings.simplefilter("ignore", category=NumbaPendingDeprecationWarning)
-
+from functools import partial
 
 # CONFIG
 NUM_TILES_1D = 100
-SAMPLES_IN_BATCH = 100 # Sample SAMPLES_IN_BATCH more points until uncert_target is reached
+SAMPLES_IN_BATCH = 100  # Sample SAMPLES_IN_BATCH more points until uncert_target is reached
 CONFIDENCE_LEVEL = 0.05
 
 
-@nb.jit
+@jit
 def is_in_mandelbrot(x, y):
-    """Toirtoise and Hare approach to check if point (x,y) is in Mandelbrot set."""
-    c = np.complex64(x) + np.complex64(y) * np.complex64(1j)
-    z_hare = z_tortoise = np.complex64(0)  # tortoise and hare start at same point
+    """Tortoise and Hare approach to check if point (x, y) is in Mandelbrot set."""
+    c = jnp.complex64(x) + jnp.complex64(y) * jnp.complex64(1j)
+    z_hare = z_tortoise = jnp.complex64(0)  # tortoise and hare start at the same point
     while True:
         z_hare = z_hare * z_hare + c
-        z_hare = (
-            z_hare * z_hare + c
-        )  # hare does one step more to get ahead of the tortoise
+        z_hare = z_hare * z_hare + c  # hare does one step more to get ahead of the tortoise
         z_tortoise = z_tortoise * z_tortoise + c  # tortoise is one step behind
         if z_hare == z_tortoise:
             return True  # orbiting or converging to zero
-        if z_hare.real**2 + z_hare.imag**2 > 4:
+        if z_hare.real ** 2 + z_hare.imag ** 2 > 4:
             return False  # diverging to infinity
 
-@nb.jit
-def count_mandelbrot(rng, num_samples, xmin, width, ymin, height):
-    """Draw num_samples random numbers uniformly between (xmin, xmin+width)
-    and (ymin, ymin+height).
+
+@partial(jit, static_argnums=(1, 2, 3, 4))
+def count_mandelbrot(rng_key, num_samples, xmin, width, ymin, height):
+    """Draw num_samples random numbers uniformly between (xmin, xmin + width)
+    and (ymin, ymin + height).
     Raise `out` by one if the number is part of the Mandelbrot set.
     """
-    out = np.int32(0)
-    for x_norm, y_norm in rng.random((num_samples, 2), np.float32):
-        x = xmin + (x_norm * width)
-        y = ymin + (y_norm * height)
+    out = 0
+    keys = random.split(rng_key, num_samples)
+    x_norm = random.uniform(keys, shape=(num_samples,), minval=0, maxval=1)
+    y_norm = random.uniform(keys, shape=(num_samples,), minval=0, maxval=1)
+
+    for i in range(num_samples):
+        x = xmin + (x_norm[i] * width)
+        y = ymin + (y_norm[i] * height)
         out += is_in_mandelbrot(x, y)
+
     return out
 
+
 # Knill limits
-xmin, xmax = -2, 1
-ymin, ymax = -3 / 2, 3 / 2
+xmin_value, xmax_value = -2, 1
+ymin_value, ymax_value = -3 / 2, 3 / 2
 
 width = 3 / NUM_TILES_1D
 height = 3 / NUM_TILES_1D
 
-@nb.jit
-def xmin(j):
+
+@jit
+def compute_xmin(j):
     """xmin of tile in column j"""
     return -2 + width * j
 
-@nb.jit
-def ymin(i):
+
+@jit
+def compute_ymin(i):
     """ymin of tile in row i"""
     return -3 / 2 + height * i
 
-rng = np.random.default_rng()  # can be forked to run multiple rngs in parallel
-rngs = rng.spawn(NUM_TILES_1D * NUM_TILES_1D)
 
-@nb.jit(parallel=True)
-def compute_until(rngs, numer, denom, uncert, uncert_target):
+rng_key = random.PRNGKey(0)  # JAX's random key
+rng_keys = random.split(rng_key, NUM_TILES_1D * NUM_TILES_1D)
+
+
+@jit
+def compute_until(rng_keys, numer, denom, uncert, uncert_target):
     """Compute area of each tile until uncert_target is reached.
-    The uncertainty is calculate with the Wald approximation in each tile.
+    The uncertainty is calculated with the Wald approximation in each tile.
     """
-    for i in nb.prange(NUM_TILES_1D):
-        for j in nb.prange(NUM_TILES_1D):
-            rng = rngs[NUM_TILES_1D * i + j]
 
-            uncert[i, j] = np.inf
+    def body_fn(i, state):
+        numer, denom, uncert = state
 
-            # Sample SAMPLES_IN_BATCH more points until uncert_target is reached
-            while uncert[i, j] > uncert_target:
-                denom[i, j] += SAMPLES_IN_BATCH
-                numer[i, j] += count_mandelbrot(
-                    rng, SAMPLES_IN_BATCH, xmin(j), width, ymin(i), height
+        def body_j(j, inner_state):
+            numer, denom, uncert = inner_state
+            rng = rng_keys[NUM_TILES_1D * i + j]
+
+            def cond_fn(carry):
+                _, _, uncert_value = carry
+                return uncert_value > uncert_target
+
+            def loop_body(carry):
+                numer_val, denom_val, uncert_value = carry
+                denom_val += SAMPLES_IN_BATCH
+                numer_val += count_mandelbrot(
+                    rng, SAMPLES_IN_BATCH, compute_xmin(j), width, compute_ymin(i), height
                 )
+                uncert_value = wald_uncertainty(numer_val, denom_val) * width * height
+                return numer_val, denom_val, uncert_value
 
-                uncert[i, j] = (
-                    wald_uncertainty(numer[i, j], denom[i, j]) * width * height
-                )
+            numer[i, j], denom[i, j], uncert[i, j] = jax.lax.while_loop(
+                cond_fn, loop_body, (numer[i, j], denom[i, j], uncert[i, j])
+            )
 
-numer = np.zeros((NUM_TILES_1D, NUM_TILES_1D), dtype=np.int64)
-denom = np.zeros((NUM_TILES_1D, NUM_TILES_1D), dtype=np.int64)
-uncert = np.zeros((NUM_TILES_1D, NUM_TILES_1D), dtype=np.float64)
+            return numer, denom, uncert
 
-compute_until(rngs, numer, denom, uncert, 1e-5)
+        numer, denom, uncert = jax.lax.fori_loop(0, NUM_TILES_1D, body_j, (numer, denom, uncert))
+        return numer, denom, uncert
 
-final_value = (np.sum((numer / denom)) * width * height).item()
+    numer, denom, uncert = jax.lax.fori_loop(0, NUM_TILES_1D, body_fn, (numer, denom, uncert))
+    return numer, denom, uncert
+
+
+numer = jnp.zeros((NUM_TILES_1D, NUM_TILES_1D), dtype=jnp.int64)
+denom = jnp.zeros((NUM_TILES_1D, NUM_TILES_1D), dtype=jnp.int64)
+uncert = jnp.zeros((NUM_TILES_1D, NUM_TILES_1D), dtype=jnp.float64)
+
+numer, denom, uncert = compute_until(rng_keys, numer, denom, uncert, 1e-5)
+
+final_value = (jnp.sum((numer / denom)) * width * height).item()
 print(f"\tThe total area of all tiles is {final_value}")
 
 confidence_interval_low, confidence_interval_high = confidence_interval(
     CONFIDENCE_LEVEL, numer, denom, width * height
 )
 
-final_uncertainty = combine_uncertaintes(
+final_uncertainty = combine_uncertainties(
     confidence_interval_low, confidence_interval_high, denom
 )
 print(f"\tThe uncertainty on the total area is {final_uncertainty}\n")
