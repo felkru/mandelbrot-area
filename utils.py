@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from scipy.stats import beta
+from jax.scipy.stats import beta
 from jax import jit
 import matplotlib.pyplot as plt
 
@@ -23,20 +23,20 @@ def confidence_interval(confidence_level, numerator, denominator, area):
 
     # Calculate the lower bound of the confidence interval
     low = (
-            jnp.nan_to_num(
-                beta.ppf(confidence_level / 2, numerator, denominator - numerator + 1),
-                nan=0
-            )
-            * area
+        jnp.nan_to_num(
+            beta.ppf(confidence_level / 2, numerator, denominator - numerator + 1),
+            nan=0,
+        )
+        * area
     )
 
     # Calculate the upper bound of the confidence interval
     high = (
-            jnp.nan_to_num(
-                beta.ppf(1 - confidence_level / 2, numerator + 1, denominator - numerator),
-                nan=1
-            )
-            * area
+        jnp.nan_to_num(
+            beta.ppf(1 - confidence_level / 2, numerator + 1, denominator - numerator),
+            nan=1,
+        )
+        * area
     )
 
     # Ensure that the low and high bounds are valid
@@ -63,17 +63,20 @@ def wald_uncertainty(numer, denom):
     return jnp.sqrt(frac * (1 - frac) / denom)
 
 
-def combine_uncertainties(confidence_interval_low, confidence_interval_high, denominator):
+def combine_uncertainties(
+    confidence_interval_low, confidence_interval_high, denominator
+):
     """
     Combine uncertainties using the formula from the stratified sampling method.
     """
     # Calculate the final uncertainty
     final_uncertainty = (
-            jnp.sum(confidence_interval_high - confidence_interval_low)
-            / jnp.sqrt(4 * jnp.sum(denominator))
+        jnp.sum(confidence_interval_high - confidence_interval_low)
+        / jnp.sqrt(4 * jnp.sum(denominator))
     ).item()
 
     return final_uncertainty
+
 
 # Key
 # Changes:
