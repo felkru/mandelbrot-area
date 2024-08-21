@@ -1,7 +1,14 @@
 import jax.numpy as jnp
 from jax import jit, random
+import jax
 import numpy as np
 from functools import partial
+from utils import (
+    combine_uncertaintes,
+    confidence_interval,
+    wald_uncertainty,
+)
+
 
 # CONFIG
 NUM_TILES_1D = 100
