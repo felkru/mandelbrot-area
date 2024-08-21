@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 from jax.scipy.stats import beta
-from jax import jit
+import jax
 import matplotlib.pyplot as plt
 
 
@@ -46,18 +46,30 @@ def confidence_interval(confidence_level, numerator, denominator, area):
     return low, high
 
 
-@jit
+@jax.jit
 def wald_uncertainty(numer, denom):
     """Wald approximation on the uncertainty of the tile using JAX."""
+
     # Handle edge cases
-    if numer == 0:
+    def true_fun(denom):
         numer = 1
         denom += 1
-    elif numer == denom:
-        denom += 1
+        return numer / denom
 
-    # Calculate the fraction
-    frac = numer / denom
+    def false_true_fun():
+        return numer / (denom + 1)
+
+    def false_false_fun():
+        return numer / denom
+
+    def false_fun(denom):
+        return jax.lax.cond(
+            numer == denom,
+            false_true_fun,
+            false_false_fun,
+        )
+
+    frac = jax.lax.cond(numer == 0, true_fun, false_fun, denom)
 
     # Return the Wald uncertainty
     return jnp.sqrt(frac * (1 - frac) / denom)
@@ -76,84 +88,3 @@ def combine_uncertainties(
     ).item()
 
     return final_uncertainty
-
-
-# Key
-# Changes:
-# JAX
-# Operations: The
-# code
-# uses
-# JAX�s
-# jnp
-# for all numerical operations to leverage JAX's capabilities.
-# JIT
-# Compilation: The @ jit
-# decorator
-# from JAX is used
-# to
-# compile
-# the
-# wald_uncertainty
-# function
-# for better performance.
-#     Edge
-#     Case
-#     Handling: The
-#     conditional
-#     checks and adjustments
-#     for numer and denom are retained but remain compatible with JAX operations.
-# Notes:
-# The
-# combine_uncertainties
-# function
-# has
-# been
-# updated
-# to
-# use
-# JAX
-# arrays and operations(jnp.sum, jnp.sqrt).The.item()
-# method is used
-# to
-# ensure
-# the
-# final
-# result is a
-# Python
-# scalar
-# rather
-# than
-# a
-# JAX
-# array.
-# JAX�s
-# jit
-# decorator
-# helps
-# optimize
-# the
-# wald_uncertainty
-# function, making
-# it
-# more
-# efficient
-# for large - scale numerical tasks.
-# This
-# rewrite
-# allows
-# the
-# functions
-# to
-# be
-# used
-# within
-# a
-# JAX - based
-# pipeline
-# while maintaining their original logic and intent.
-#
-# ChatGPT
-# can
-# make
-#
