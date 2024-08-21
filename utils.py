@@ -1,7 +1,7 @@
 import jax.numpy as jnp
-from jax.scipy.stats import beta
-from jax import jit
 import matplotlib.pyplot as plt
+from jax import jit
+from jax.scipy.stats import beta
 
 
 def plot_pixels(pixels, figsize=(7, 7), dpi=300, extend=[-2, 1, -3 / 2, 3 / 2]):
@@ -24,7 +24,7 @@ def confidence_interval(confidence_level, numerator, denominator, area):
     # Calculate the lower bound of the confidence interval
     low = (
         jnp.nan_to_num(
-            beta.ppf(confidence_level / 2, numerator, denominator - numerator + 1),
+            beta.pdf(confidence_level / 2, numerator, denominator - numerator + 1),
             nan=0,
         )
         * area
@@ -33,7 +33,7 @@ def confidence_interval(confidence_level, numerator, denominator, area):
     # Calculate the upper bound of the confidence interval
     high = (
         jnp.nan_to_num(
-            beta.ppf(1 - confidence_level / 2, numerator + 1, denominator - numerator),
+            beta.pdf(1 - confidence_level / 2, numerator + 1, denominator - numerator),
             nan=1,
         )
         * area
@@ -46,7 +46,7 @@ def confidence_interval(confidence_level, numerator, denominator, area):
     return low, high
 
 
-@jit
+# @jit
 def wald_uncertainty(numer, denom):
     """Wald approximation on the uncertainty of the tile using JAX."""
     # Handle edge cases
