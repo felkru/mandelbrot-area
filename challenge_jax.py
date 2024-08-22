@@ -16,9 +16,9 @@ from utils import (
 )
 
 # CONFIG
-NUM_TILES_1D = 100
+NUM_TILES_1D = 10
 SAMPLES_IN_BATCH = (
-    100  # Sample SAMPLES_IN_BATCH more points until uncert_target is reached
+    2  # Sample SAMPLES_IN_BATCH more points until uncert_target is reached
 )
 CONFIDENCE_LEVEL = 0.05
 
@@ -38,15 +38,27 @@ def is_in_mandelbrot(x, y):
     z_hare = z_tortoise = jnp.complex64(0)
 
     def body_fun(val):
-        print("is_in_mandelbrot starts")
         z_hare, z_tortoise, c = val
+        jax.debug.print(
+            "is_in_mandelbrot starts: z_hare = {z_h}, z_tortoise = {z_t}, c = {c}",
+            z_h=z_hare,
+            z_t=z_tortoise,
+            c=c,
+        )
         z_hare = z_hare * z_hare + c
         z_hare = z_hare * z_hare + c
         z_tortoise = z_tortoise * z_tortoise + c
         return [z_hare, z_tortoise, c]
 
     def cond_fun(val):
-        return (val[0] != val[1]) & ((val[0].real ** 2 + val[0].imag ** 2) < 4)
+        not_converge = val[0] != val[1]
+        not_diverge = (val[0].real ** 2 + val[0].imag ** 2) < 4
+        # jax.debug.print(
+        #     "not_converge = {not_c}, not_diverge = {not_d}",
+        #     not_c=not_converge,
+        #     not_d=not_diverge,
+        # )
+        return not_converge & not_diverge
 
     return jax.lax.while_loop(
         cond_fun,
@@ -68,7 +80,7 @@ def count_mandelbrot(rng_key, num_samples, xmin, width, ymin, height):
     x = xmin + (x_norm * width)
     y = ymin + (y_norm * height)
     z_h, z_t, c = jax.vmap(is_in_mandelbrot)(x, y)
-    print("is_in_mandelbrot finished")
+    jax.debug.print("is_in_mandelbrot finished")
 
     result = (z_h.real**2 + z_h.imag**2) < 4
 
@@ -89,7 +101,7 @@ def ymin(i):
     return -3 / 2 + height * i
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=["uncert_target"])
 def compute_until(rng_key, uncert_target, i, j):
     """Compute area of each tile until uncert_target is reached.
     The uncertainty is calculate with the Wald approximation in each tile.
@@ -103,14 +115,14 @@ def compute_until(rng_key, uncert_target, i, j):
         return val[2] > uncert_target
 
     def body_fun(val):
-        print("compute_until starts")
+        jax.debug.print("compute_until starts")
         val[0] += SAMPLES_IN_BATCH
         val[1] += count_mandelbrot(
             rng_key, SAMPLES_IN_BATCH, xmin(j), width, ymin(i), height
         )
-        print("count_mandelbrot finished")
+        jax.debug.print("count_mandelbrot finished")
         val[2] = wald_uncertainty(val[1], val[0]) * width * height
-        print("wald_uncertainty finished")
+        jax.debug.print("wald_uncertainty finished")
         return val
 
     val = jax.lax.while_loop(
@@ -118,7 +130,7 @@ def compute_until(rng_key, uncert_target, i, j):
         body_fun,
         init_val,
     )
-    print("loop finished")
+    jax.debug.print("loop finished")
 
     return val
 
@@ -129,7 +141,7 @@ denom, numer, uncert = jax.vmap(
 )(rng_key, 1e-5, jnp.arange(NUM_TILES_1D), jnp.arange(NUM_TILES_1D))
 
 final_value = (jnp.sum((numer / denom)) * width * height).item()
-print(f"\tThe total area of all tiles is {final_value}")
+jax.debug.print(f"\tThe total area of all tiles is {final_value}")
 
 confidence_interval_low, confidence_interval_high = confidence_interval(
     CONFIDENCE_LEVEL, numer, denom, width * height
@@ -138,4 +150,4 @@ confidence_interval_low, confidence_interval_high = confidence_interval(
 final_uncertainty = combine_uncertainties(
     confidence_interval_low, confidence_interval_high, denom
 )
-print(f"\tThe uncertainty on the total area is {final_uncertainty}\n")
+jax.debug.print(f"\tThe uncertainty on the total area is {final_uncertainty}\n")
