@@ -50,11 +50,7 @@ def is_in_mandelbrot(x, y):
             return False  # diverging to infinity
 
 
-def diverges(z):
-    return z.real**2 + z.imag**2 > 4
-
-
-# @jax.jit
+@jax.jit
 def mandelbrot_jax(x, y):
     c = x + y * 1j
     init_vals = (jnp.complex64(0), jnp.complex64(0), c)
@@ -83,7 +79,7 @@ def mandelbrot_jax(x, y):
     return jax.lax.while_loop(cond_fun, body_fun, body_fun(init_vals))
 
 
-# @jax.jit
+@partial(jax.jit, static_argnames=("num_samples"))
 def count_mandelbrot(key, num_samples, xmin, width, ymin, height):
     """Draw num_samples random numbers uniformly between (xmin, xmin+width)
     and (ymin, ymin+height).
@@ -96,7 +92,7 @@ def count_mandelbrot(key, num_samples, xmin, width, ymin, height):
     y = ymin + (y_norm * height)
     zhare, ztort, c = jax.vmap(mandelbrot_jax)(x, y)
 
-    diverged = diverges(zhare)
+    diverged = zhare.real**2 + zhare.imag**2 > 4
 
     return jnp.sum(~diverged)
 
@@ -159,14 +155,14 @@ def compute_until_jax(key, uncert_target, i, j):
 
     def body_fun(val):
         val[0] += SAMPLES_IN_BATCH
-        jax.debug.print("before count_mandelbrot")
+        # jax.debug.print("before count_mandelbrot")
         val[1] += count_mandelbrot(
             key, SAMPLES_IN_BATCH, xmin(j), width, ymin(i), height
         )
 
-        jax.debug.print("after count_mandelbrot")
+        # jax.debug.print("after count_mandelbrot")
         val[2] = wald_uncertainty(val[1], val[0]) * width * height
-        jax.debug.print("val: {val}", val=val)
+        # jax.debug.print("val: {val}", val=val)
         return val
 
     val = jax.lax.while_loop(
@@ -174,6 +170,8 @@ def compute_until_jax(key, uncert_target, i, j):
         body_fun,
         init_val,
     )
+
+    jax.debug.print("tile (i, j): {ij}", ij=(i.item(), j.item()))
 
     return val
 
@@ -196,13 +194,13 @@ key = jax.random.key(2)
 
 print("RUNNING")
 
-# denom_arr, numer_arr, unc_arr = compute_until_vmap(
-#     key, 1e-5, jnp.arange(NUM_TILES_1D), jnp.arange(NUM_TILES_1D)
-# )
-# # compute_until(subkeys, numer, denom, uncert, 1e-5)
+denom_arr, numer_arr, unc_arr = compute_until_vmap(
+    key, 1e-5, jnp.arange(NUM_TILES_1D) + 1, jnp.arange(NUM_TILES_1D) + 1
+)
+# compute_until(subkeys, numer, denom, uncert, 1e-5)
 
-# final_value = (jnp.sum((numer / denom)) * width * height).item()
-# print(f"\tThe total area of all tiles is {final_value}")
+final_value = (jnp.sum((numer / denom)) * width * height).item()
+print(f"\tThe total area of all tiles is {final_value}")
 
 # confidence_interval_low, confidence_interval_high = confidence_interval(
 #     CONFIDENCE_LEVEL, numer, denom, width * height
@@ -213,5 +211,5 @@ print("RUNNING")
 # )
 # print(f"\tThe uncertainty on the total area is {final_uncertainty}\n")
 
-y, x = jnp.ogrid[-2:1:100j, -1.5:0:100j]
-c = x + y * 1j
+# y, x = jnp.ogrid[-2:1:100j, -1.5:0:100j]
+# c = x + y * 1j
