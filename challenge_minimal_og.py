@@ -6,6 +6,7 @@
 # and some of the LaTeX syntax has been removed for readability
 
 import warnings
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -26,7 +27,7 @@ jax.config.update("jax_enable_x64", True)
 
 
 # CONFIG
-NUM_TILES_1D = 100
+NUM_TILES_1D = 10
 SAMPLES_IN_BATCH = (
     100  # Sample SAMPLES_IN_BATCH more points until uncert_target is reached
 )
@@ -61,12 +62,12 @@ def mandelbrot_jax(x, y):
     def cond_fun(val):
         diverge = (val[0].real ** 2 + val[0].imag ** 2) > 4
         not_converge = val[0] != val[1]
-        jax.debug.print(
-            "val: {val}, diverge {x}, not_converge {y}",
-            val=val,
-            x=diverge,
-            y=not_converge,
-        )
+        # jax.debug.print(
+        #     "val: {val}, diverge {x}, not_converge {y}",
+        #     val=val,
+        #     x=diverge,
+        #     y=not_converge,
+        # )
         return ~diverge & not_converge
 
     def body_fun(val):
@@ -146,6 +147,7 @@ def compute_until(subkeys, numer, denom, uncert, uncert_target):
 #     y, x = jnp.ogrid[-2:1:100j, -1.5:0:100j]
 
 
+@partial(jax.jit, static_argnames=("uncert_target"))
 def compute_until_jax(key, uncert_target, i, j):
     uncert = jnp.inf
     denom = 0
@@ -157,11 +159,14 @@ def compute_until_jax(key, uncert_target, i, j):
 
     def body_fun(val):
         val[0] += SAMPLES_IN_BATCH
+        jax.debug.print("before count_mandelbrot")
         val[1] += count_mandelbrot(
             key, SAMPLES_IN_BATCH, xmin(j), width, ymin(i), height
         )
 
-        val[2] = wald_uncertainty(numer, denom) * width * height
+        jax.debug.print("after count_mandelbrot")
+        val[2] = wald_uncertainty(val[1], val[0]) * width * height
+        jax.debug.print("val: {val}", val=val)
         return val
 
     val = jax.lax.while_loop(
@@ -188,11 +193,13 @@ uncert = jnp.zeros((NUM_TILES_1D, NUM_TILES_1D), dtype=jnp.float64)
 
 
 key = jax.random.key(2)
-subkeys = jax.random.split(key, NUM_TILES_1D * NUM_TILES_1D).reshape(
-    (NUM_TILES_1D, NUM_TILES_1D)
-)
-# compute_until_vmap(subkeys, numer, denom, uncert, 1e-5)
-# compute_until(subkeys, numer, denom, uncert, 1e-5)
+
+print("RUNNING")
+
+# denom_arr, numer_arr, unc_arr = compute_until_vmap(
+#     key, 1e-5, jnp.arange(NUM_TILES_1D), jnp.arange(NUM_TILES_1D)
+# )
+# # compute_until(subkeys, numer, denom, uncert, 1e-5)
 
 # final_value = (jnp.sum((numer / denom)) * width * height).item()
 # print(f"\tThe total area of all tiles is {final_value}")

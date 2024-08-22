@@ -1,5 +1,7 @@
+import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 from jax import jit
 from jax.scipy.stats import beta
 
@@ -46,21 +48,50 @@ def confidence_interval(confidence_level, numerator, denominator, area):
     return low, high
 
 
-# @jit
+@jax.jit
 def wald_uncertainty(numer, denom):
     """Wald approximation on the uncertainty of the tile using JAX."""
+
     # Handle edge cases
-    if numer == 0:
+    def true_fun(denom):
         numer = 1
         denom += 1
-    elif numer == denom:
-        denom += 1
+        return numer / denom
 
-    # Calculate the fraction
-    frac = numer / denom
+    def false_true_fun():
+        return numer / (denom + 1)
+
+    def false_false_fun():
+        return numer / denom
+
+    def false_fun(denom):
+        return jax.lax.cond(
+            numer == denom,
+            false_true_fun,
+            false_false_fun,
+        )
+
+    frac = jax.lax.cond(numer == 0, true_fun, false_fun, denom)
 
     # Return the Wald uncertainty
     return jnp.sqrt(frac * (1 - frac) / denom)
+
+
+# # @jit
+# def wald_uncertainty(numer, denom):
+#     """Wald approximation on the uncertainty of the tile using JAX."""
+#     # Handle edge cases
+#     if numer == 0:
+#         numer = 1
+#         denom += 1
+#     elif numer == denom:
+#         denom += 1
+
+#     # Calculate the fraction
+#     frac = numer / denom
+
+#     # Return the Wald uncertainty
+#     return jnp.sqrt(frac * (1 - frac) / denom)
 
 
 def combine_uncertainties(
